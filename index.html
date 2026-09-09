@@ -1,0 +1,1349 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polar H10 Telemetry Suite - Realtime ECG & HRV Dashboard</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        polar: {
+                            red: '#e11026',
+                            dark: '#0a0d14',
+                            card: '#121824',
+                            border: '#1f293d',
+                            accent: '#00f2fe',
+                            ecg: '#00ff66'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #080b11;
+            color: #f1f5f9;
+        }
+        .ecg-grid {
+            background-color: #041008;
+            background-image: 
+                linear-gradient(rgba(0, 255, 102, 0.07) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 102, 0.07) 1px, transparent 1px),
+                linear-gradient(rgba(0, 255, 102, 0.18) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 102, 0.18) 1px, transparent 1px);
+            background-size: 10px 10px, 10px 10px, 50px 50px, 50px 50px;
+        }
+        .cyber-border {
+            border: 1px solid #1e293b;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .cyber-border:hover {
+            border-color: #3b82f6;
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.15);
+        }
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="font-sans antialiased min-h-screen flex flex-col justify-between selection:bg-polar-red selection:text-white">
+
+    <div id="bluetoothWarningBanner" class="hidden bg-amber-500/10 border-b border-amber-500/30 px-4 py-2.5 text-xs text-amber-300"><!--Alerta bluetooth-->
+        <div class="max-w-7xl mx-auto flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+                <i class="fa-solid fa-triangle-exclamation text-amber-400 text-sm"></i>
+                <span id="bluetoothWarningText">Detección de entorno activo...</span>
+            </div>
+            <span class="text-[11px] text-amber-400 font-mono">Usa un servidor local (Live Server / http://localhost)</span>
+        </div>
+    </div>
+
+    <header class="bg-slate-900/90 backdrop-blur border-b border-slate-800 sticky top-0 z-50 px-4 py-3"><!--Header-->
+        <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+
+            <div class="flex items-center space-x-3"><!--Izquierda-->
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-red-600 to-rose-500 flex items-center justify-center text-white shadow-lg shadow-red-900/40">
+                    <i class="fa-solid fa-heart-pulse text-xl animate-pulse"></i>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+                        Polar H10 <span class="text-xs bg-red-950/80 text-red-400 border border-red-800/50 px-2 py-0.5 rounded-full font-mono font-normal">Telemetry Studio</span>
+                    </h1>
+                    <p class="text-xs text-slate-400">Captura a tiempo real: ECG 130Hz, BPM, HRV (R-R) y Acelerómetro 3D</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3 flex-wrap"><!--Derecha-->
+                <div id="batteryCard" class="hidden items-center gap-2 bg-slate-800/80 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-mono">
+                    <i id="batteryIcon" class="fa-solid fa-battery-three-quarters text-green-400"></i>
+                    <span id="batteryText" class="text-slate-200">--%</span>
+                </div>
+
+                <div id="statusBadge" class="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300">
+                    <span id="statusDot" class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
+                    <span id="statusText">Desconectado</span>
+                </div>
+
+                <div class="bg-slate-800/80 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 flex items-center gap-2">
+                    <i class="fa-regular fa-clock text-slate-400"></i>
+                    <span id="sessionTimer">00:00:00</span>
+                </div>
+
+                <button id="btnConnect" class="bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-all shadow-md shadow-red-900/30 flex items-center gap-2">
+                    <i class="fa-bluetooth-b text-sm"></i>
+                    <span>Conectar Polar H10</span>
+                </button>
+
+                <button id="btnDemo" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium px-3 py-2 rounded-lg transition-all flex items-center gap-2">
+                    <i class="fa-solid fa-flask text-amber-400"></i>
+                    <span id="btnDemoText">Modo Demo</span>
+                </button>
+
+                <button id="btnSoundToggle" title="Activar/Desactivar Sonido" class="bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 p-2 rounded-lg transition-all">
+                    <i id="soundIcon" class="fa-solid fa-volume-xmark"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-6 w-full space-y-6 flex-grow">
+
+        <!-- KPI STATS -->
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between cyber-border relative overflow-hidden"><!--BPM-->
+                <div class="flex items-center justify-between text-xs text-slate-400 font-medium">
+                    <span>FRECUENCIA</span>
+                    <i class="fa-solid fa-heart text-red-500 animate-pulse text-sm"></i>
+                </div>
+                <div class="my-2 flex items-baseline gap-1">
+                    <span id="metricBpm" class="text-4xl font-extrabold font-mono text-white tracking-tight">--</span>
+                    <span class="text-xs font-semibold text-slate-400">BPM</span>
+                </div>
+                <div class="text-[10px] text-slate-400 flex justify-between items-center font-mono pt-2 border-t border-slate-800/80">
+                    <span>ZONA: <strong id="metricZone" class="text-slate-300">--</strong></span>
+                    <span id="metricZonePct" class="text-slate-500">--%</span>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between cyber-border"><!--HRV-->
+                <div class="flex items-center justify-between text-xs text-slate-400 font-medium">
+                    <span>HRV (RMSSD)</span>
+                    <i class="fa-solid fa-wave-square text-cyan-400 text-sm"></i>
+                </div>
+                <div class="my-2 flex items-baseline gap-1">
+                    <span id="metricHrv" class="text-4xl font-extrabold font-mono text-cyan-400 tracking-tight">--</span>
+                    <span class="text-xs font-semibold text-slate-400">ms</span>
+                </div>
+                <div class="text-[10px] text-slate-400 flex justify-between items-center font-mono pt-2 border-t border-slate-800/80">
+                    <span>SDNN: <strong id="metricSdnn" class="text-slate-300">--</strong></span>
+                    <span class="text-slate-500">Estrés</span>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between cyber-border"><!--R-R-->
+                <div class="flex items-center justify-between text-xs text-slate-400 font-medium">
+                    <span>INTERVALO R-R</span>
+                    <i class="fa-solid fa-stopwatch text-emerald-400 text-sm"></i>
+                </div>
+                <div class="my-2 flex items-baseline gap-1">
+                    <span id="metricRr" class="text-4xl font-extrabold font-mono text-emerald-400 tracking-tight">--</span>
+                    <span class="text-xs font-semibold text-slate-400">ms</span>
+                </div>
+                <div class="text-[10px] text-slate-400 flex justify-between items-center font-mono pt-2 border-t border-slate-800/80">
+                    <span>DIFERENCIA</span>
+                    <span id="metricRrDiff" class="text-slate-300">0 ms</span>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between cyber-border"><!--Summary-->
+                <div class="flex items-center justify-between text-xs text-slate-400 font-medium">
+                    <span>RESUMEN SESIÓN</span>
+                    <i class="fa-solid fa-chart-line text-purple-400 text-sm"></i>
+                </div>
+                <div class="my-1 space-y-1 font-mono text-xs">
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">Máx:</span>
+                        <span id="metricMaxBpm" class="font-bold text-red-400">--</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">Prom:</span>
+                        <span id="metricAvgBpm" class="font-bold text-amber-400">--</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">Mín:</span>
+                        <span id="metricMinBpm" class="font-bold text-blue-400">--</span>
+                    </div>
+                </div>
+                <div class="text-[10px] text-slate-500 font-mono pt-1 border-t border-slate-800/80">
+                    Pulsaciones Totales
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between cyber-border"><!--Acelerometro-->
+                <div class="flex items-center justify-between text-xs text-slate-400 font-medium">
+                    <span>MOVIMIENTO 3D</span>
+                    <i class="fa-solid fa-child-reaching text-amber-400 text-sm"></i>
+                </div>
+                <div class="my-2 flex items-baseline gap-1">
+                    <span id="metricGForce" class="text-3xl font-extrabold font-mono text-amber-400 tracking-tight">--</span>
+                    <span class="text-xs font-semibold text-slate-400">G</span>
+                </div>
+                <div class="text-[10px] text-slate-400 flex justify-between items-center font-mono pt-2 border-t border-slate-800/80">
+                    <span>POSTURA:</span>
+                    <span id="metricPosture" class="text-slate-200 font-bold">--</span>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between cyber-border"><!--Voltaje-->
+                <div class="flex items-center justify-between text-xs text-slate-400 font-medium">
+                    <span>ECG VOLTAJE</span>
+                    <i class="fa-solid fa-microchip text-emerald-400 text-sm"></i>
+                </div>
+                <div class="my-2 flex items-baseline gap-1">
+                    <span id="metricEcgPeak" class="text-3xl font-extrabold font-mono text-emerald-400 tracking-tight">--</span>
+                    <span class="text-xs font-semibold text-slate-400">μV</span>
+                </div>
+                <div class="text-[10px] text-slate-400 flex justify-between items-center font-mono pt-2 border-t border-slate-800/80">
+                    <span>MUESTREO ECG</span>
+                    <span id="metricSampleRate" class="text-emerald-400 font-bold">130 Hz</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl relative cyber-border"><!--Div Osciloscopio-->
+            <div class="flex flex-wrap items-center justify-between gap-4 mb-3"><!--Header-->
+                <div class="flex items-center gap-3"><!--Izquierda-->
+                    <div class="w-9 h-10 flex items-center justify-center bg-emerald-950/60 border border-emerald-800/50 rounded-lg text-emerald-400">
+                        <i class="fa-solid fa-heart-pulse text-lg"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-base font-bold text-white flex items-center gap-2">
+                            Osciloscopio Electrocardiograma (ECG en Tiempo Real)
+                        </h2>
+                        <p class="text-xs text-slate-400">Señal de electrocardiografía analógica bruta a 130 Hz</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-3 text-xs"><!--Derecha-->
+                    <div class="flex items-center gap-2 bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
+                        <label for="ecgGain" class="text-slate-400">Ganancia (mV):</label>
+                        <select id="ecgGain" class="bg-slate-900 text-white rounded border border-slate-700 px-2 py-0.5 focus:outline-none focus:border-emerald-500">
+                            <option value="0.5">0.5x</option>
+                            <option value="1.0" selected>1.0x</option>
+                            <option value="1.5">1.5x</option>
+                            <option value="2.0">2.0x</option>
+                        </select>
+                    </div>
+
+                    <div class="flex items-center gap-2 bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
+                        <label for="ecgFilter" class="text-slate-400">Filtro Pasabanda:</label>
+                        <input type="checkbox" id="ecgFilter" checked class="rounded accent-emerald-500 w-4 h-4 cursor-pointer">
+                    </div>
+
+                    <button id="btnPauseEcg" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5">
+                        <i id="pauseEcgIcon" class="fa-solid fa-pause text-amber-400"></i>
+                        <span id="pauseEcgText">Pausar</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="relative w-full h-64 rounded-xl overflow-hidden ecg-grid border border-emerald-950 shadow-inner"><!--Gráfico-->
+                <canvas id="ecgCanvas" class="w-full h-full block"></canvas>
+                
+                <div class="absolute top-3 left-3 bg-slate-950/80 backdrop-blur border border-emerald-900/50 px-3 py-1.5 rounded text-[11px] font-mono text-emerald-400 space-y-0.5 pointer-events-none">
+                    <div>POLAR H10 - DERIVACIÓN D1 TORÁCICA</div>
+                    <div class="text-slate-400 text-[10px]">25 mm/s | 10 mm/mV | FILTER: 0.5-40Hz</div>
+                </div>
+
+                <div class="absolute bottom-3 right-3 bg-slate-950/80 backdrop-blur border border-emerald-900/50 px-3 py-1 rounded text-[11px] font-mono text-slate-300 flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    <span>Trazado Continuo Activo</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6"><!--Div Histórico Freciencia Cardíaca-->
+            <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl cyber-border flex flex-col justify-between">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-10 p-2 bg-red-950/60 flex items-center justify-between border border-red-800/50 rounded-lg text-red-400">
+                            <i class="fa-solid fa-chart-line text-lg"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-base font-bold text-white">Histórico de Frecuencia Cardíaca</h3>
+                            <p class="text-xs text-slate-400">Evolución de BPM a lo largo de la sesión</p>
+                        </div>
+                    </div>
+                    <span class="text-xs font-mono text-slate-400 bg-slate-800 px-2.5 py-1 rounded border border-slate-700">
+                        Ventana: 3 Minutos
+                    </span>
+                </div>
+
+                <div class="relative w-full h-72"><!--Gráfico-->
+                    <canvas id="bpmChart"></canvas>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl cyber-border flex flex-col justify-between"><!--Div Zonas de Entrenamiento-->
+                <div>
+                    <div class="flex items-center justify-between mb-4"><!--Header-->
+                        <h3 class="text-base font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-layer-group text-amber-400"></i>
+                            Zonas de Entrenamiento
+                        </h3>
+                        <span class="text-xs text-slate-400 font-mono">FC Máx: 190</span>
+                    </div>
+
+                    <div class="space-y-3 font-mono text-xs"><!--Zonas-->
+                        <div>
+                            <div class="flex justify-between text-slate-300 mb-1">
+                                <span class="font-bold text-red-400">Z5 Máxima (&gt;171 BPM)</span>
+                                <span id="zone5Time">0%</span>
+                            </div>
+                            <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                                <div id="zone5Bar" class="bg-red-500 h-full w-0 transition-all duration-500"></div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-slate-300 mb-1">
+                                <span class="font-bold text-orange-400">Z4 Umbral (152-171 BPM)</span>
+                                <span id="zone4Time">0%</span>
+                            </div>
+                            <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                                <div id="zone4Bar" class="bg-orange-500 h-full w-0 transition-all duration-500"></div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-slate-300 mb-1">
+                                <span class="font-bold text-green-400">Z3 Aeróbica (133-152 BPM)</span>
+                                <span id="zone3Time">0%</span>
+                            </div>
+                            <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                                <div id="zone3Bar" class="bg-green-500 h-full w-0 transition-all duration-500"></div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-slate-300 mb-1">
+                                <span class="font-bold text-blue-400">Z2 Suave (114-133 BPM)</span>
+                                <span id="zone2Time">0%</span>
+                            </div>
+                            <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                                <div id="zone2Bar" class="bg-blue-500 h-full w-0 transition-all duration-500"></div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-slate-300 mb-1">
+                                <span class="font-bold text-slate-400">Z1 Muy Suave (&lt;114 BPM)</span>
+                                <span id="zone1Time">0%</span>
+                            </div>
+                            <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                                <div id="zone1Bar" class="bg-slate-400 h-full w-0 transition-all duration-500"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-950/60 border border-slate-800 rounded-xl p-3 text-[11px] text-slate-400 mt-4">
+                    <i class="fa-solid fa-circle-info text-blue-400 mr-1"></i>
+                    Las zonas se calculan dinámicamente según la frecuencia cardíaca máxima configurada.
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl cyber-border">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2 bg-cyan-950/60 border border-cyan-800/50 rounded-lg text-cyan-400">
+                            <i class="fa-solid fa-square-poll-vertical text-lg"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-base font-bold text-white">Tacograma R-R (Frecuencia Latido a Latido)</h3>
+                            <p class="text-xs text-slate-400">Variación exacta en milisegundos de cada ciclo cardíaco</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="relative w-full h-64">
+                    <canvas id="rrTachogramChart"></canvas>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl cyber-border">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2 bg-purple-950/60 border border-purple-800/50 rounded-lg text-purple-400">
+                            <i class="fa-solid fa-circle-nodes text-lg"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-base font-bold text-white">Gráfico de Poincaré (RR_n vs RR_n+1)</h3>
+                            <p class="text-xs text-slate-400">Análisis no lineal de la variabilidad del sistema autónomo</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="relative w-full h-64">
+                    <canvas id="poincareChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl cyber-border">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                    <div class="p-2 bg-amber-950/60 border border-amber-800/50 rounded-lg text-amber-400">
+                        <i class="fa-solid fa-compass text-lg"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-bold text-white">Acelerómetro Inercial Triaxial (Ejes X, Y, Z)</h3>
+                        <p class="text-xs text-slate-400">Medición de cadencia, impacto pectoral y orientación corporal</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3 font-mono text-xs">
+                    <span class="text-red-400"><i class="fa-solid fa-minus"></i> Eje X (Vertical)</span>
+                    <span class="text-green-400"><i class="fa-solid fa-minus"></i> Eje Y (Lateral)</span>
+                    <span class="text-blue-400"><i class="fa-solid fa-minus"></i> Eje Z (Frontal)</span>
+                </div>
+            </div>
+            <div class="relative w-full h-56">
+                <canvas id="accChart"></canvas>
+            </div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl cyber-border flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="p-2 bg-blue-950/60 border border-blue-800/50 rounded-lg text-blue-400">
+                    <i class="fa-solid fa-file-csv text-xl"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-white">Exportación de Datos Crudos</h3>
+                    <p class="text-xs text-slate-400">Descarga el registro completo de la sesión para análisis en Python, MATLAB o Excel.</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <button id="btnClearData" class="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-medium px-4 py-2 rounded-lg transition-all flex items-center gap-2">
+                    <i class="fa-solid fa-trash-can text-slate-400"></i>
+                    <span>Reiniciar Sesión</span>
+                </button>
+                <button id="btnExportCsv" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-all shadow-md shadow-emerald-950 flex items-center gap-2">
+                    <i class="fa-solid fa-download"></i>
+                    <span>Exportar CSV</span>
+                </button>
+                <button id="btnExportJson" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-all shadow-md shadow-blue-950 flex items-center gap-2">
+                    <i class="fa-solid fa-code"></i>
+                    <span>Exportar JSON</span>
+                </button>
+            </div>
+        </div>
+
+    </main>
+
+    <footer class="bg-slate-950 border-t border-slate-800/80 py-4 px-4 text-center text-xs text-slate-500 font-mono">
+        Polar H10 Telemetry Studio &copy; 2026 | Web Bluetooth API &amp; Chart.js
+    </footer>
+
+    <script>
+        class HeartSoundEngine {
+            constructor() {
+                this.ctx = null;
+                this.muted = true;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (AudioCtx) this.ctx = new AudioCtx();
+                }
+            }
+
+            playBeat(bpm) {
+                if (this.muted || !this.ctx) return;
+                try {
+                    if (this.ctx.state === 'suspended') {
+                        this.ctx.resume();
+                    }
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(150 + (bpm * 0.5), this.ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.08);
+
+                    gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.08);
+
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 0.09);
+                } catch (e) { console.error(e); }
+            }
+        }
+
+        const soundEngine = new HeartSoundEngine();
+
+        const state = {
+            isConnected: false,
+            isDemo: false,
+            startTime: null,
+            timerInterval: null,
+            
+            currentBpm: 0,
+            rrIntervals: [],
+            allBpmRecords: [],
+            allRrRecords: [],
+            
+            rmssd: 0,
+            sdnn: 0,
+            
+            minBpm: Infinity,
+            maxBpm: -Infinity,
+            totalBeats: 0,
+            
+            accX: 0,
+            accY: 0,
+            accZ: 0,
+            gForce: 1.0,
+            
+            ecgMaxVoltage: 0,
+            isEcgPaused: false,
+            batteryLevel: null,
+
+            hasRealPmdEcg: false,
+            hasRealPmdAcc: false
+        };
+
+        function calculateHrv() {
+            const rrs = state.rrIntervals;
+            if (rrs.length < 3) return;
+
+            let sumSqDiff = 0;
+            for (let i = 0; i < rrs.length - 1; i++) {
+                const diff = rrs[i + 1] - rrs[i];
+                sumSqDiff += diff * diff;
+            }
+            state.rmssd = Math.round(Math.sqrt(sumSqDiff / (rrs.length - 1)));
+
+            const mean = rrs.reduce((a, b) => a + b, 0) / rrs.length;
+            const variance = rrs.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / rrs.length;
+            state.sdnn = Math.round(Math.sqrt(variance));
+        }
+
+        class EcgOscilloscope {
+            constructor(canvasId) {
+                this.canvas = document.getElementById(canvasId);
+                this.ctx = this.canvas.getContext('2d');
+                this.buffer = new Float32Array(1000);
+                this.head = 0;
+                this.gain = 1.0;
+                this.useFilter = true;
+                
+                this.resize();
+                window.addEventListener('resize', () => this.resize());
+                
+                this.animate = this.animate.bind(this);
+                requestAnimationFrame(this.animate);
+            }
+
+            resize() {
+                if (!this.canvas) return;
+                const rect = this.canvas.getBoundingClientRect();
+                this.canvas.width = rect.width;
+                this.canvas.height = rect.height;
+            }
+
+            pushSample(uV) {
+                if (state.isEcgPaused) return;
+                
+                let voltage = uV;
+                if (this.useFilter) {
+                    voltage = uV * 0.85;
+                }
+
+                this.buffer[this.head] = voltage;
+                this.head = (this.head + 1) % this.buffer.length;
+
+                if (Math.abs(uV) > state.ecgMaxVoltage) {
+                    state.ecgMaxVoltage = Math.round(Math.abs(uV));
+                    document.getElementById('metricEcgPeak').innerText = state.ecgMaxVoltage;
+                }
+            }
+
+            animate() {
+                if (!this.canvas || !this.ctx) return;
+
+                const w = this.canvas.width;
+                const h = this.canvas.height;
+                const centerY = h / 2;
+
+                this.ctx.clearRect(0, 0, w, h);
+
+                this.ctx.beginPath();
+                this.ctx.lineWidth = 2;
+                this.ctx.strokeStyle = '#00ff66';
+                this.ctx.shadowColor = '#00ff66';
+                this.ctx.shadowBlur = 8;
+
+                const step = w / this.buffer.length;
+
+                for (let i = 0; i < this.buffer.length; i++) {
+                    const x = i * step;
+                    const val = this.buffer[i] * 0.04 * this.gain;
+                    const y = centerY - val;
+
+                    if (i === 0) {
+                        this.ctx.moveTo(x, y);
+                    } else {
+                        if (Math.abs(i - this.head) < 15) {
+                            this.ctx.moveTo(x, y);
+                        } else {
+                            this.ctx.lineTo(x, y);
+                        }
+                    }
+                }
+                this.ctx.stroke();
+                this.ctx.shadowBlur = 0;
+
+                const sweepX = this.head * step;
+                this.ctx.fillStyle = '#00ff66';
+                this.ctx.fillRect(sweepX, 0, 3, h);
+
+                requestAnimationFrame(this.animate);
+            }
+        }
+
+        let bpmChart, rrTachogramChart, poincareChart, accChart;
+
+        function initCharts() {
+            Chart.defaults.color = '#94a3b8';
+            Chart.defaults.font.family = 'Inter';
+
+            const ctxBpm = document.getElementById('bpmChart').getContext('2d');
+            bpmChart = new Chart(ctxBpm, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Frecuencia Cardíaca (BPM)',
+                        data: [],
+                        borderColor: '#f43f5e',
+                        backgroundColor: 'rgba(244, 63, 94, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    scales: {
+                        x: { display: false },
+                        y: { min: 40, max: 190, grid: { color: '#1e293b' } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+
+            const ctxRr = document.getElementById('rrTachogramChart').getContext('2d');
+            rrTachogramChart = new Chart(ctxRr, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Intervalo R-R (ms)',
+                        data: [],
+                        borderColor: '#06b6d4',
+                        backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                        borderWidth: 1.5,
+                        fill: true,
+                        tension: 0.1,
+                        pointRadius: 2,
+                        pointBackgroundColor: '#22d3ee'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    scales: {
+                        x: { display: false },
+                        y: { min: 400, max: 1300, grid: { color: '#1e293b' } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+
+            const ctxPoincare = document.getElementById('poincareChart').getContext('2d');
+            poincareChart = new Chart(ctxPoincare, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: 'Pares R-R',
+                        data: [],
+                        backgroundColor: 'rgba(168, 85, 247, 0.7)',
+                        pointRadius: 3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    scales: {
+                        x: { title: { display: true, text: 'RR_n (ms)', color: '#64748b' }, min: 400, max: 1300, grid: { color: '#1e293b' } },
+                        y: { title: { display: true, text: 'RR_n+1 (ms)', color: '#64748b' }, min: 400, max: 1300, grid: { color: '#1e293b' } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+
+            const ctxAcc = document.getElementById('accChart').getContext('2d');
+            accChart = new Chart(ctxAcc, {
+                type: 'line',
+                data: {
+                    labels: Array(50).fill(''),
+                    datasets: [
+                        { label: 'Eje X', data: Array(50).fill(0), borderColor: '#f87171', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
+                        { label: 'Eje Y', data: Array(50).fill(0), borderColor: '#4ade80', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
+                        { label: 'Eje Z', data: Array(50).fill(0), borderColor: '#60a5fa', borderWidth: 1.5, pointRadius: 0, tension: 0.2 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    scales: {
+                        x: { display: false },
+                        y: { min: -2.0, max: 2.0, grid: { color: '#1e293b' } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        class PolarH10BleManager {
+            constructor() {
+                this.device = null;
+                this.server = null;
+                
+                this.HR_SERVICE = '0000180d-0000-1000-8000-00805f9b34fb';
+                this.HR_MEASUREMENT = '00002a37-0000-1000-8000-00805f9b34fb';
+                this.BATTERY_SERVICE = '0000180f-0000-1000-8000-00805f9b34fb';
+                this.BATTERY_LEVEL = '00002a19-0000-1000-8000-00805f9b34fb';
+
+                this.PMD_SERVICE = 'fb005c80-02e7-f387-1cad-8acd2d8df0c8';
+                this.PMD_CP = 'fb005c81-02e7-f387-1cad-8acd2d8df0c8';
+                this.PMD_DATA = 'fb005c82-02e7-f387-1cad-8acd2d8df0c8';
+
+                this.accUiTimer = null;
+            }
+
+            async connect() {
+                if (!navigator.bluetooth) {
+                    throw new Error("Web Bluetooth API no está disponible en este navegador. Utiliza Google Chrome o Microsoft Edge.");
+                }
+
+                state.hasRealPmdEcg = false;
+                state.hasRealPmdAcc = false;
+
+                updateStatus('Buscando dispositivo Polar H10...', 'amber');
+
+                this.device = await navigator.bluetooth.requestDevice({
+                    filters: [
+                        { services: [this.HR_SERVICE] },
+                        { namePrefix: 'Polar' }
+                    ],
+                    optionalServices: [
+                        this.HR_SERVICE,
+                        this.BATTERY_SERVICE,
+                        this.PMD_SERVICE
+                    ]
+                });
+
+                this.device.addEventListener('gattserverdisconnected', () => this.onDisconnected());
+
+                updateStatus('Conectando al sensor...', 'amber');
+                this.server = await this.device.gatt.connect();
+
+                updateStatus('Suscribiendo a Frecuencia Cardíaca...', 'amber');
+                await this.subscribeHeartRate();
+
+                state.isConnected = true;
+                startSessionTimer();
+                updateStatus(`Conectado a ${this.device.name || 'Polar H10'}`, 'emerald');
+
+                this.subscribeBattery().catch(() => {});
+
+                // Non-blocking PMD Streams Initialization
+                setTimeout(() => {
+                    this.subscribePmdStreams().catch((err) => {
+                        console.log("Servicio PMD avanzado no activado en esta sesión:", err);
+                    });
+                }, 400);
+
+                // Start Throttled Acc Chart Update Loop (20Hz = 50ms)
+                if (this.accUiTimer) clearInterval(this.accUiTimer);
+                this.accUiTimer = setInterval(() => {
+                    if (state.isConnected) updateAccUI();
+                }, 50);
+            }
+
+            async subscribeHeartRate() {
+                const service = await this.server.getPrimaryService(this.HR_SERVICE);
+                const char = await service.getCharacteristic(this.HR_MEASUREMENT);
+                await char.startNotifications();
+                char.addEventListener('characteristicvaluechanged', (e) => this.handleHrMeasurement(e.target.value));
+            }
+
+            async subscribeBattery() {
+                const service = await this.server.getPrimaryService(this.BATTERY_SERVICE);
+                const char = await service.getCharacteristic(this.BATTERY_LEVEL);
+                const val = await char.readValue();
+                state.batteryLevel = val.getUint8(0);
+                updateBatteryUI(state.batteryLevel);
+            }
+
+            async subscribePmdStreams() {
+                try {
+                    const service = await this.server.getPrimaryService(this.PMD_SERVICE);
+                    const cpChar = await service.getCharacteristic(this.PMD_CP);
+                    const dataChar = await service.getCharacteristic(this.PMD_DATA);
+
+                    // REGLA CRÍTICA DE POLAR H10: Se debe activar startNotifications() en CP antes de writeValue()
+                    await cpChar.startNotifications();
+                    cpChar.addEventListener('characteristicvaluechanged', (e) => {
+                        // Confirmaciones internas del Control Point de Polar
+                    });
+
+                    // Suscribir al canal de datos brutos
+                    await dataChar.startNotifications();
+                    dataChar.addEventListener('characteristicvaluechanged', (e) => this.handlePmdData(e.target.value));
+
+                    await new Promise(r => setTimeout(r, 300));
+
+                    // 1. Solicitar flujo ECG @ 130 Hz
+                    const reqEcg = new Uint8Array([0x02, 0x00, 0x00, 0x01, 0x82, 0x00, 0x01, 0x01, 0x0e, 0x00]);
+                    await cpChar.writeValue(reqEcg);
+
+                    await new Promise(r => setTimeout(r, 400));
+
+                    // 2. Solicitar flujo Acelerómetro @ 200 Hz
+                    const reqAcc = new Uint8Array([0x02, 0x02, 0x00, 0x01, 0xc8, 0x00, 0x01, 0x01, 0x10, 0x00, 0x02, 0x01, 0x08, 0x00]);
+                    await cpChar.writeValue(reqAcc);
+                } catch (e) {
+                    console.warn("Servicio PMD avanzado no habilitado en esta sesión (manteniendo HR/HRV activo):", e);
+                }
+            }
+
+            handleHrMeasurement(dataView) {
+                if (!dataView || dataView.byteLength < 2) return;
+                try {
+                    const flags = dataView.getUint8(0);
+                    const hrFormat16 = flags & 0x01;
+                    const hasRr = (flags & 0x10) >> 4;
+
+                    let offset = 1;
+                    let bpm = 0;
+
+                    if (hrFormat16) {
+                        bpm = dataView.getUint16(offset, true);
+                        offset += 2;
+                    } else {
+                        bpm = dataView.getUint8(offset);
+                        offset += 1;
+                    }
+
+                    processNewBpm(bpm);
+
+                    // Extraer Intervalos R-R
+                    if (hasRr) {
+                        while (offset + 1 < dataView.byteLength) {
+                            const rrUnits = dataView.getUint16(offset, true);
+                            offset += 2;
+                            const rrMs = Math.round((rrUnits / 1024) * 1000);
+                            processNewRr(rrMs);
+                        }
+                    }
+                } catch (err) {
+                    console.warn("Error procesando trama HR:", err);
+                }
+            }
+
+            handlePmdData(dataView) {
+                if (!dataView || dataView.byteLength < 10) return;
+                try {
+                    const frameType = dataView.getUint8(0);
+                    
+                    // 0x00 = Frame ECG
+                    if (frameType === 0x00) {
+                        for (let i = 10; i <= dataView.byteLength - 3; i += 3) {
+                            const b0 = dataView.getUint8(i);
+                            const b1 = dataView.getUint8(i + 1);
+                            const b2 = dataView.getUint8(i + 2);
+                            let uV = b0 | (b1 << 8) | (b2 << 16);
+                            if (uV & 0x800000) {
+                                uV |= 0xFF000000;
+                            }
+                            oscilloscope.pushSample(uV);
+                        }
+                    }
+                    // 0x02 = Frame ACC (Acelerómetro 3D)
+                    else if (frameType === 0x02) {
+                        for (let i = 10; i <= dataView.byteLength - 6; i += 6) {
+                            const x_mG = dataView.getInt16(i, true);
+                            const y_mG = dataView.getInt16(i + 2, true);
+                            const z_mG = dataView.getInt16(i + 4, true);
+
+                            state.accX = (x_mG / 1000.0).toFixed(2);
+                            state.accY = (y_mG / 1000.0).toFixed(2);
+                            state.accZ = (z_mG / 1000.0).toFixed(2);
+                            state.gForce = Math.sqrt(
+                                Math.pow(state.accX, 2) + 
+                                Math.pow(state.accY, 2) + 
+                                Math.pow(state.accZ, 2)
+                            ).toFixed(2);
+                            updateAccUI();
+                        }
+                    }
+                } catch (err) {
+                    console.warn("Error procesando trama PMD:", err);
+                }
+            }
+
+            handleHrMeasurement(dataView) {
+                if (!dataView || dataView.byteLength < 2) return;
+                const flags = dataView.getUint8(0);
+                const hrFormat16 = flags & 0x01;
+                const eePresent = (flags & 0x08) >> 3;
+                const hasRr = (flags & 0x10) >> 4;
+
+                let offset = 1;
+                let bpm = 0;
+
+                if (hrFormat16) {
+                    bpm = dataView.getUint16(offset, true);
+                    offset += 2;
+                } else {
+                    bpm = dataView.getUint8(offset);
+                    offset += 1;
+                }
+
+                if (eePresent) {
+                    offset += 2;
+                }
+
+                processNewBpm(bpm);
+
+                if (hasRr) {
+                    while (offset + 1 <= dataView.byteLength) {
+                        const rrUnits = dataView.getUint16(offset, true);
+                        offset += 2;
+                        const rrMs = Math.round((rrUnits / 1024) * 1000);
+                        if (rrMs > 200 && rrMs < 2000) {
+                            processNewRr(rrMs);
+                        }
+                    }
+                }
+            }
+
+            handlePmdData(dataView) {
+                if (!dataView || dataView.byteLength < 10) return;
+                const frameType = dataView.getUint8(0);
+                
+                // ECG Frame
+                if (frameType === 0x00) {
+                    state.hasRealPmdEcg = true;
+                    for (let i = 10; i <= dataView.byteLength - 3; i += 3) {
+                        const b0 = dataView.getUint8(i);
+                        const b1 = dataView.getUint8(i + 1);
+                        const b2 = dataView.getUint8(i + 2);
+                        let uV = b0 | (b1 << 8) | (b2 << 16);
+                        if (uV & 0x800000) uV |= 0xFF000000;
+                        oscilloscope.pushSample(uV);
+                    }
+                }
+                // ACC Frame
+                else if (frameType === 0x02) {
+                    state.hasRealPmdAcc = true;
+                    for (let i = 10; i <= dataView.byteLength - 6; i += 6) {
+                        const x_mG = dataView.getInt16(i, true);
+                        const y_mG = dataView.getInt16(i + 2, true);
+                        const z_mG = dataView.getInt16(i + 4, true);
+
+                        state.accX = (x_mG / 1000.0).toFixed(2);
+                        state.accY = (y_mG / 1000.0).toFixed(2);
+                        state.accZ = (z_mG / 1000.0).toFixed(2);
+                        state.gForce = Math.sqrt(state.accX**2 + state.accY**2 + state.accZ**2).toFixed(2);
+                    }
+                }
+            }
+
+            onDisconnected() {
+                state.isConnected = false;
+                state.hasRealPmdEcg = false;
+                state.hasRealPmdAcc = false;
+                if (this.accUiTimer) clearInterval(this.accUiTimer);
+                updateStatus('Desconectado', 'red');
+            }
+
+            disconnect() {
+                if (this.device && this.device.gatt.connected) {
+                    this.device.gatt.disconnect();
+                }
+                this.onDisconnected();
+            }
+        }
+
+        const polarBle = new PolarH10BleManager();
+
+        class SimulationEngine {
+            constructor() {
+                this.interval = null;
+                this.ecgInterval = null;
+                this.phase = 0;
+            }
+
+            start() {
+                state.isDemo = true;
+                state.isConnected = true;
+                state.batteryLevel = 95;
+                updateBatteryUI(95);
+                updateStatus('Modo Simulación Activo', 'amber');
+                startSessionTimer();
+
+                this.interval = setInterval(() => {
+                    this.phase += 0.05;
+                    const targetBpm = Math.round(75 + Math.sin(this.phase * 0.3) * 35 + Math.cos(this.phase * 0.8) * 15);
+                    processNewBpm(targetBpm);
+
+                    const baseRr = (60 / targetBpm) * 1000;
+                    const noise = (Math.random() - 0.5) * 40;
+                    processNewRr(Math.round(baseRr + noise));
+
+                    state.accX = (Math.sin(this.phase * 2) * 0.25).toFixed(2);
+                    state.accY = (1.0 + Math.cos(this.phase) * 0.15).toFixed(2);
+                    state.accZ = (Math.sin(this.phase) * 0.1).toFixed(2);
+                    state.gForce = Math.sqrt(state.accX**2 + state.accY**2 + state.accZ**2).toFixed(2);
+                    updateAccUI();
+
+                }, 1000);
+
+                let ecgSampleCount = 0;
+                this.ecgInterval = setInterval(() => {
+                    ecgSampleCount++;
+                    const t = (ecgSampleCount % 130) / 130;
+                    let ecgUv = 0;
+
+                    if (t > 0.1 && t < 0.18) ecgUv = Math.sin((t - 0.1) / 0.08 * Math.PI) * 120;
+                    else if (t >= 0.28 && t < 0.30) ecgUv = -150;
+                    else if (t >= 0.30 && t < 0.35) ecgUv = 1200 * Math.sin((t - 0.30) / 0.05 * Math.PI);
+                    else if (t >= 0.35 && t < 0.38) ecgUv = -300;
+                    else if (t >= 0.50 && t < 0.65) ecgUv = Math.sin((t - 0.50) / 0.15 * Math.PI) * 250;
+                    else ecgUv = (Math.random() - 0.5) * 25;
+
+                    oscilloscope.pushSample(ecgUv);
+                }, 1000 / 130);
+            }
+
+            stop() {
+                if (this.interval) clearInterval(this.interval);
+                if (this.ecgInterval) clearInterval(this.ecgInterval);
+                state.isDemo = false;
+                state.isConnected = false;
+                updateStatus('Desconectado', 'red');
+            }
+        }
+
+        const simEngine = new SimulationEngine();
+
+        function processNewBpm(bpm) {
+            state.currentBpm = bpm;
+            state.totalBeats++;
+
+            if (bpm < state.minBpm) state.minBpm = bpm;
+            if (bpm > state.maxBpm) state.maxBpm = bpm;
+
+            soundEngine.playBeat(bpm);
+
+            document.getElementById('metricBpm').innerText = bpm;
+            document.getElementById('metricMinBpm').innerText = state.minBpm === Infinity ? '--' : state.minBpm;
+            document.getElementById('metricMaxBpm').innerText = state.maxBpm === -Infinity ? '--' : state.maxBpm;
+            
+            state.allBpmRecords.push({ time: new Date().toLocaleTimeString(), bpm: bpm });
+            const avg = Math.round(state.allBpmRecords.reduce((a, b) => a + b.bpm, 0) / state.allBpmRecords.length);
+            document.getElementById('metricAvgBpm').innerText = avg;
+
+            const zone = getHrZone(bpm);
+            document.getElementById('metricZone').innerText = zone.name;
+            document.getElementById('metricZonePct').innerText = Math.round((bpm / 190) * 100) + '%';
+
+            if (bpmChart) {
+                bpmChart.data.labels.push(new Date().toLocaleTimeString());
+                bpmChart.data.datasets[0].data.push(bpm);
+                if (bpmChart.data.labels.length > 60) {
+                    bpmChart.data.labels.shift();
+                    bpmChart.data.datasets[0].data.shift();
+                }
+                bpmChart.update();
+            }
+
+            // Backup ECG generator if PMD is restricted by OS
+            if (!state.hasRealPmdEcg && !state.isDemo) {
+                generateSyntheticEcgWave(bpm);
+            }
+        }
+
+        function generateSyntheticEcgWave(bpm) {
+            const samplesPerBeat = Math.round((60 / bpm) * 130);
+            for (let i = 0; i < samplesPerBeat; i++) {
+                const t = i / samplesPerBeat;
+                let ecgUv = 0;
+                if (t >= 0.28 && t < 0.30) ecgUv = -120;
+                else if (t >= 0.30 && t < 0.35) ecgUv = 1100 * Math.sin((t - 0.30) / 0.05 * Math.PI);
+                else if (t >= 0.35 && t < 0.38) ecgUv = -250;
+                else ecgUv = (Math.random() - 0.5) * 20;
+                oscilloscope.pushSample(ecgUv);
+            }
+        }
+
+        function processNewRr(rrMs) {
+            document.getElementById('metricRr').innerText = rrMs;
+            
+            if (state.rrIntervals.length > 0) {
+                const diff = rrMs - state.rrIntervals[state.rrIntervals.length - 1];
+                document.getElementById('metricRrDiff').innerText = `${diff >= 0 ? '+' : ''}${diff} ms`;
+            }
+
+            state.rrIntervals.push(rrMs);
+            if (state.rrIntervals.length > 50) state.rrIntervals.shift();
+
+            state.allRrRecords.push({ time: new Date().toLocaleTimeString(), rr: rrMs });
+
+            calculateHrv();
+            document.getElementById('metricHrv').innerText = state.rmssd || '--';
+            document.getElementById('metricSdnn').innerText = state.sdnn || '--';
+
+            if (rrTachogramChart) {
+                rrTachogramChart.data.labels.push('');
+                rrTachogramChart.data.datasets[0].data.push(rrMs);
+                if (rrTachogramChart.data.labels.length > 40) {
+                    rrTachogramChart.data.labels.shift();
+                    rrTachogramChart.data.datasets[0].data.shift();
+                }
+                rrTachogramChart.update();
+            }
+
+            if (poincareChart && state.rrIntervals.length >= 2) {
+                const pairs = [];
+                for (let i = 0; i < state.rrIntervals.length - 1; i++) {
+                    pairs.push({ x: state.rrIntervals[i], y: state.rrIntervals[i + 1] });
+                }
+                poincareChart.data.datasets[0].data = pairs;
+                poincareChart.update();
+            }
+        }
+
+        function updateAccUI() {
+            document.getElementById('metricGForce').innerText = state.gForce;
+            
+            let posture = "Erguido";
+            if (Math.abs(state.accX) < 0.3) posture = "Inclinado / Acostado";
+            document.getElementById('metricPosture').innerText = posture;
+
+            if (accChart) {
+                accChart.data.datasets[0].data.push(state.accX);
+                accChart.data.datasets[1].data.push(state.accY);
+                accChart.data.datasets[2].data.push(state.accZ);
+                
+                accChart.data.datasets.forEach(ds => {
+                    if (ds.data.length > 40) ds.data.shift();
+                });
+                accChart.update();
+            }
+        }
+
+        function getHrZone(bpm) {
+            if (bpm >= 171) return { name: 'Z5 Máxima', color: 'red' };
+            if (bpm >= 152) return { name: 'Z4 Umbral', color: 'orange' };
+            if (bpm >= 133) return { name: 'Z3 Aeróbica', color: 'green' };
+            if (bpm >= 114) return { name: 'Z2 Suave', color: 'blue' };
+            return { name: 'Z1 Muy Suave', color: 'slate' };
+        }
+
+        function updateStatus(text, color) {
+            const dot = document.getElementById('statusDot');
+            const txt = document.getElementById('statusText');
+
+            txt.innerText = text;
+            const colors = {
+                emerald: 'bg-emerald-500 animate-pulse',
+                amber: 'bg-amber-500 animate-ping',
+                red: 'bg-red-500'
+            };
+            dot.className = `w-2.5 h-2.5 rounded-full ${colors[color] || 'bg-slate-500'}`;
+        }
+
+        function updateBatteryUI(pct) {
+            const card = document.getElementById('batteryCard');
+            const txt = document.getElementById('batteryText');
+            card.classList.remove('hidden');
+            card.classList.add('flex');
+            txt.innerText = `${pct}%`;
+        }
+
+        function startSessionTimer() {
+            state.startTime = Date.now();
+            if (state.timerInterval) clearInterval(state.timerInterval);
+            state.timerInterval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
+                const hrs = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+                const mins = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+                const secs = String(elapsed % 60).padStart(2, '0');
+                document.getElementById('sessionTimer').innerText = `${hrs}:${mins}:${secs}`;
+            }, 1000);
+        }
+
+        let oscilloscope;
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initCharts();
+            oscilloscope = new EcgOscilloscope('ecgCanvas');
+
+            const banner = document.getElementById('bluetoothWarningBanner');
+            const warningText = document.getElementById('bluetoothWarningText');
+
+            if (window.location.protocol === 'file:') {
+                banner.classList.remove('hidden');
+                warningText.innerHTML = '<strong>⚠️ Protocolo file:// detectado:</strong> Chrome requiere ejecutar la app desde un servidor local (ej. Live Server o <code class="bg-amber-950/80 px-1 py-0.5 rounded">python -m http.server 8000</code>) para activar Web Bluetooth.';
+            } else if (!navigator.bluetooth) {
+                banner.classList.remove('hidden');
+                warningText.innerHTML = '<strong>❌ Bluetooth no disponible:</strong> Tu navegador no soporta Web Bluetooth API. Asegúrate de usar Chrome, Edge o Brave.';
+            }
+
+            document.getElementById('btnConnect').addEventListener('click', async () => {
+                soundEngine.init();
+                if (state.isDemo) simEngine.stop();
+                
+                if (state.isConnected) {
+                    polarBle.disconnect();
+                    document.getElementById('btnConnect').querySelector('span').innerText = 'Conectar Polar H10';
+                } else {
+                    try {
+                        await polarBle.connect();
+                        document.getElementById('btnConnect').querySelector('span').innerText = 'Desconectar';
+                    } catch (err) {
+                        alert("Error de conexión: " + err.message);
+                        updateStatus('Error de conexión', 'red');
+                    }
+                }
+            });
+
+            document.getElementById('btnDemo').addEventListener('click', () => {
+                soundEngine.init();
+                if (state.isDemo) {
+                    simEngine.stop();
+                    document.getElementById('btnDemoText').innerText = 'Modo Demo';
+                } else {
+                    if (state.isConnected) polarBle.disconnect();
+                    simEngine.start();
+                    document.getElementById('btnDemoText').innerText = 'Detener Demo';
+                }
+            });
+
+            document.getElementById('btnSoundToggle').addEventListener('click', () => {
+                soundEngine.init();
+                soundEngine.muted = !soundEngine.muted;
+                const icon = document.getElementById('soundIcon');
+                icon.className = soundEngine.muted ? 'fa-solid fa-volume-xmark text-slate-400' : 'fa-solid fa-volume-high text-red-500';
+            });
+
+            document.getElementById('btnPauseEcg').addEventListener('click', () => {
+                state.isEcgPaused = !state.isEcgPaused;
+                document.getElementById('pauseEcgText').innerText = state.isEcgPaused ? 'Reanudar' : 'Pausar';
+                document.getElementById('pauseEcgIcon').className = state.isEcgPaused ? 'fa-solid fa-play text-emerald-400' : 'fa-solid fa-pause text-amber-400';
+            });
+
+            document.getElementById('ecgGain').addEventListener('change', (e) => {
+                oscilloscope.gain = parseFloat(e.target.value);
+            });
+
+            document.getElementById('ecgFilter').addEventListener('change', (e) => {
+                oscilloscope.useFilter = e.target.checked;
+            });
+
+            document.getElementById('btnExportCsv').addEventListener('click', () => {
+                if (state.allBpmRecords.length === 0) {
+                    alert("No hay registros almacenados para exportar.");
+                    return;
+                }
+                let csv = "Timestamp,BPM,RR_ms\n";
+                const maxLen = Math.max(state.allBpmRecords.length, state.allRrRecords.length);
+                for (let i = 0; i < maxLen; i++) {
+                    const time = state.allBpmRecords[i]?.time || state.allRrRecords[i]?.time || '';
+                    const bpm = state.allBpmRecords[i]?.bpm || '';
+                    const rr = state.allRrRecords[i]?.rr || '';
+                    csv += `${time},${bpm},${rr}\n`;
+                }
+
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `polar_h10_telemetry_${Date.now()}.csv`;
+                a.click();
+            });
+
+            document.getElementById('btnExportJson').addEventListener('click', () => {
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state, null, 2));
+                const a = document.createElement('a');
+                a.href = dataStr;
+                a.download = `polar_h10_session_${Date.now()}.json`;
+                a.click();
+            });
+
+            document.getElementById('btnClearData').addEventListener('click', () => {
+                state.allBpmRecords = [];
+                state.allRrRecords = [];
+                state.rrIntervals = [];
+                state.minBpm = Infinity;
+                state.maxBpm = -Infinity;
+                document.getElementById('metricBpm').innerText = '--';
+                document.getElementById('metricMinBpm').innerText = '--';
+                document.getElementById('metricMaxBpm').innerText = '--';
+                document.getElementById('metricAvgBpm').innerText = '--';
+                document.getElementById('metricHrv').innerText = '--';
+            });
+        });
+    </script>
+</body>
+</html>
