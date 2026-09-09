@@ -7,7 +7,7 @@ A lightweight, static web application designed to extract and visualize real-tim
 
 ## Live Application
 
-[Insert your GitHub Pages link here, e.g., https://yourusername.github.io/polar-h10-ble-extractor]
+[Link](https://gonzaloesloga.github.io/polar-h10-data-reader/)
 
 ## System Requirements
 
